@@ -31,16 +31,22 @@ A tool to **archive** Substack newsletters you are currently subscribed to. This
     cd substack-scraper
     ```
 
-2.  **Install dependencies:**
+2.  **Create and activate a virtual environment:**
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+    On Windows: `venv\Scripts\activate`.
+
+    Re-run `source venv/bin/activate` in each new terminal before using the tool.
+
+3.  **Install dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
 
-3.  **Install Playwright browsers:**
-    (Required for the login helper)
-    ```bash
-    playwright install chromium
-    ```
+4.  **Install Brave Browser:**
+    The login helper drives your local [Brave](https://brave.com/) install instead of a bundled Chromium. On macOS the default install path is auto-detected. On Linux/Windows, or if Brave is installed in a non-standard location, set `BRAVE_EXECUTABLE_PATH` in `.env`.
 
 ## Authentication
 
@@ -53,7 +59,7 @@ For most newsletters, you only need to log in once.
     ```bash
     python login.py
     ```
-2.  A Chrome window will open. Log in to `substack.com`.
+2.  A Brave window will open. Log in to `substack.com`.
 3.  **Go back to the terminal** and press **Enter** to save your session.
 4.  This creates `substack_session.json`, which works for **all** standard Substack newsletters.
 
@@ -64,7 +70,7 @@ Newsletters with their own domains are isolated "islands" and require their own 
     ```bash
     python login.py https://www.lennysnewsletter.com
     ```
-2.  A Chrome window will open. Log in to that specific site.
+2.  A Brave window will open. Log in to that specific site.
 3.  **Go back to the terminal** and press **Enter** to save your session.
 4.  This saves a domain-specific session (e.g., `substack_session_www.lennysnewsletter.com.json`) which the scraper will automatically detect and use.
 

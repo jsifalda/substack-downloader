@@ -1,12 +1,30 @@
 import json
 import os
+import sys
 import time
 from playwright.sync_api import sync_playwright
+from dotenv import load_dotenv
+
+load_dotenv()
 
 SESSION_FILE = "substack_session.json"
 
 import argparse
 from urllib.parse import urlparse
+
+
+def get_brave_path():
+    override = os.getenv("BRAVE_EXECUTABLE_PATH")
+    if override:
+        return override
+    if sys.platform == "darwin":
+        return "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+    if sys.platform.startswith("linux"):
+        return "/usr/bin/brave-browser"
+    if sys.platform == "win32":
+        return r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+    raise RuntimeError("Unsupported platform; set BRAVE_EXECUTABLE_PATH")
+
 
 def run():
     parser = argparse.ArgumentParser(description="Login helper for Substack scraper")
@@ -14,9 +32,15 @@ def run():
     args = parser.parse_args()
 
     print("Launching browser for login...")
+    brave_path = get_brave_path()
+    if not os.path.exists(brave_path):
+        raise FileNotFoundError(
+            f"Brave not found at {brave_path}. "
+            "Install Brave or set BRAVE_EXECUTABLE_PATH in your .env / shell."
+        )
+
     with sync_playwright() as p:
-        # Launch Chrome (non-headless so user can see and interact)
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=False, executable_path=brave_path)
         context = browser.new_context()
         page = context.new_page()
 
