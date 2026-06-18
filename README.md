@@ -103,6 +103,33 @@ python scraper.py --url https://www.robkhenderson.com --limit 5
 python scraper.py --url https://read.substack.com --output-dir ~/Obsidian/Newsletters
 ```
 
+## Incremental Updates
+
+The scraper remembers the newest post it downloaded (in a small
+`.substack_state.json` file inside each newsletter's folder). On the next run it
+only fetches posts published since then and stops early, so re-running stays fast.
+
+**Resume (default):** just run the same command again.
+```bash
+# First run downloads everything; later runs grab only what's new
+python scraper.py --url https://read.substack.com
+```
+
+**Download from a specific date** (overrides saved state):
+```bash
+python scraper.py --url https://read.substack.com --since 2024-01-01
+```
+
+**Force a clean re-download** (deletes the newsletter folder, then re-downloads all):
+```bash
+python scraper.py --url https://read.substack.com --full
+# Add --yes to skip the confirmation prompt
+```
+
+> [!NOTE]
+> `--limit` runs do **not** update the saved date, since they only cover the newest
+> N posts. This avoids leaving a permanent gap in your archive.
+
 ## Output
 
 Downloaded posts are saved in the `archive/` directory (configurable with `--output-dir`), organized by domain:
@@ -113,6 +140,7 @@ archive/
 │   ├── assets/
 │   │   ├── image1.jpg
 │   │   └── ...
+│   ├── .substack_state.json   # tracks the newest downloaded date (for resuming)
 │   ├── 2023-10-01_some-post-title.md
 │   └── 2023-10-01_some-post-title.html
 └── ...

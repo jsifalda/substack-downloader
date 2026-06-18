@@ -1,15 +1,52 @@
 import os
 import time
 import json
+import shutil
 import argparse
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 from dotenv import load_dotenv
+from datetime import datetime, timezone
 
 from urllib.parse import urlparse, unquote, urljoin
 
 load_dotenv()
+
+STATE_FILENAME = ".substack_state.json"
+
+
+def state_path(output_dir):
+    return os.path.join(output_dir, STATE_FILENAME)
+
+
+def load_state(output_dir):
+    """Read the per-archive sync state, or {} if missing/unreadable."""
+    try:
+        with open(state_path(output_dir), 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(output_dir, latest_post_date):
+    """Persist the newest downloaded post date so the next run can resume."""
+    state = {
+        "latest_post_date": latest_post_date,
+        "last_run": datetime.now(timezone.utc).isoformat(),
+    }
+    with open(state_path(output_dir), 'w') as f:
+        json.dump(state, f, indent=2)
+
+
+def is_newer(post_date, since):
+    """True if post_date should be downloaded given the resume boundary `since`.
+
+    A missing post_date is treated as newer so it is never silently skipped.
+    """
+    if since is None or post_date is None:
+        return True
+    return post_date > since
 
 class SubstackScraper:
     def __init__(self, base_url, cookie=None):
@@ -232,59 +269,85 @@ class SubstackScraper:
                 f.write(full_md)
 
 
-    def scrape(self, output_dir="archive", limit=None, skip_podcasts=False, html_only=False, md_only=False):
+    def scrape(self, output_dir="archive", limit=None, skip_podcasts=False, html_only=False, md_only=False, since=None):
         """Main scraping loop."""
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
         print(f"Starting scrape for {self.base_url}...")
-        
+        if since:
+            print(f"Incremental: only posts newer than {since}")
+
         offset = 0
         batch_size = 12
         total_fetched = 0
-        
+        newest_seen = None
+        reached_cutoff = False
+
         while True:
             if limit and total_fetched >= limit:
                 break
-                
+
             batch_limit = batch_size
             if limit and (limit - total_fetched) < batch_size:
                 batch_limit = limit - total_fetched
 
             print(f"Fetching posts {offset} to {offset + batch_limit}...")
             posts = self.get_archive(limit=batch_limit, offset=offset)
-            
+
             if not posts:
                 break
-                
+
             for post_summary in tqdm(posts):
                 if limit and total_fetched >= limit:
                     break
-                    
+
                 slug = post_summary.get('slug')
                 if not slug:
                     continue
+
+                # The archive is newest-first, so stop once we reach a post we
+                # already have. Checked before the podcast skip so the cutoff is
+                # consistent regardless of --skip-podcasts.
+                post_date = post_summary.get('post_date')
+                if post_date and (newest_seen is None or post_date > newest_seen):
+                    newest_seen = post_date
+                if not is_newer(post_date, since):
+                    reached_cutoff = True
+                    break
 
                 # Check if it's a podcast
                 is_podcast = post_summary.get('type') == 'podcast' or post_summary.get('podcast_url') is not None
                 if skip_podcasts and is_podcast:
                     print(f"Skipping podcast: {slug}")
                     continue
-                    
+
                 # Small delay to be nice
                 time.sleep(1)
-                
+
                 full_post = self.get_post(slug)
                 if full_post:
                     self.save_post(full_post, output_dir, html_only=html_only, md_only=md_only)
                     total_fetched += 1
-            
+
             # Since we might skip posts, we can't just rely on total_fetched for offset
             # We must consistently move the offset by the number of posts fetched from API
             offset += len(posts)
-            
+
+            if reached_cutoff:  # Everything older follows; no need to page further
+                break
+
             if len(posts) < batch_limit:  # No more posts (checked against what we asked for)
                 break
+
+        # Persist the newest post date so the next run resumes from here.
+        # Skip on limited runs: they only cover the newest N posts, so advancing
+        # state would permanently skip the older posts that were never downloaded.
+        if limit is None:
+            prev_latest = load_state(output_dir).get('latest_post_date')
+            new_latest = max(filter(None, [prev_latest, newest_seen]), default=None)
+            if new_latest:
+                save_state(output_dir, new_latest)
 
         print(f"Scraping complete. Downloaded {total_fetched} posts.")
 
@@ -297,7 +360,10 @@ def main():
     parser.add_argument("--html-only", action="store_true", help="Save only HTML files")
     parser.add_argument("--md-only", action="store_true", help="Save only Markdown files")
     parser.add_argument("--output-dir", default="./archive", help="Base directory where the archive is created (default: ./archive)")
-    
+    parser.add_argument("--since", help="Only download posts newer than this date (e.g. 2024-01-01). Overrides saved state.")
+    parser.add_argument("--full", action="store_true", help="Ignore saved state, wipe the newsletter folder, and re-download everything")
+    parser.add_argument("--yes", "-y", action="store_true", help="Skip the confirmation prompt when using --full")
+
     args = parser.parse_args()
 
     # Priority:
@@ -332,8 +398,26 @@ def main():
     # Create a nice output directory name from the URL
     domain = urlparse(args.url).netloc
     output_dir = os.path.join(args.output_dir, domain)
-    
-    scraper.scrape(output_dir=output_dir, limit=args.limit, skip_podcasts=args.skip_podcasts, html_only=args.html_only, md_only=args.md_only)
+
+    # Resolve the incremental resume boundary.
+    # Priority: --full (clean) > --since (manual) > saved state (auto-resume).
+    if args.full:
+        since = None
+        if os.path.exists(output_dir):
+            if not args.yes:
+                confirm = input(f"--full will delete '{output_dir}' and re-download everything. Continue? [y/N] ")
+                if confirm.strip().lower() not in ('y', 'yes'):
+                    print("Aborted.")
+                    return
+            shutil.rmtree(output_dir, ignore_errors=True)
+    elif args.since:
+        since = args.since
+    else:
+        since = load_state(output_dir).get('latest_post_date')
+        if since:
+            print(f"Resuming from saved state ({since}). Use --full to re-download everything.")
+
+    scraper.scrape(output_dir=output_dir, limit=args.limit, skip_podcasts=args.skip_podcasts, html_only=args.html_only, md_only=args.md_only, since=since)
 
 if __name__ == "__main__":
     main()
