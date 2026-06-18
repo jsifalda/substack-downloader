@@ -97,9 +97,15 @@ python scraper.py --url https://newsletter.pragmaticengineer.com --skip-podcasts
 python scraper.py --url https://www.robkhenderson.com --limit 5
 ```
 
+**Custom Output Location:**
+```bash
+# Save into a custom location (default is ./archive)
+python scraper.py --url https://read.substack.com --output-dir ~/Obsidian/Newsletters
+```
+
 ## Output
 
-Downloaded posts are saved in the `archive/` directory, organized by domain:
+Downloaded posts are saved in the `archive/` directory (configurable with `--output-dir`), organized by domain:
 
 ```
 archive/

@@ -296,6 +296,7 @@ def main():
     parser.add_argument("--skip-podcasts", action="store_true", help="Skip downloading podcast episodes")
     parser.add_argument("--html-only", action="store_true", help="Save only HTML files")
     parser.add_argument("--md-only", action="store_true", help="Save only Markdown files")
+    parser.add_argument("--output-dir", default="./archive", help="Base directory where the archive is created (default: ./archive)")
     
     args = parser.parse_args()
 
@@ -330,7 +331,7 @@ def main():
     
     # Create a nice output directory name from the URL
     domain = urlparse(args.url).netloc
-    output_dir = os.path.join("archive", domain)
+    output_dir = os.path.join(args.output_dir, domain)
     
     scraper.scrape(output_dir=output_dir, limit=args.limit, skip_podcasts=args.skip_podcasts, html_only=args.html_only, md_only=args.md_only)
 
